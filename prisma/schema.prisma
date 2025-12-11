@@ -1,0 +1,186 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  name         String   @db.VarChar(100)
+  email        String   @unique @db.VarChar(50)
+  password     String   @db.VarChar(255)
+  verified     Boolean  @default(false)
+  refreshToken String?  @map("refresh_token")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  devices      Device[]
+
+  @@map("users")
+}
+
+model Device {
+  id                   Int     @id @default(autoincrement())
+  userId               Int     @map("user_id")
+  serialNumber         String  @unique @map("serial_number") @db.VarChar(100)
+  model                String? @db.VarChar(100)
+  auth                 String?
+  location             String?
+  webhookUrl           String? @map("webhook_url") @db.Text
+  publicKey            String? @map("public_key")
+  privateKey           String? @map("private_key")
+  stamp                String? @default("0") @map("stamp") @db.VarChar(50)
+  opStamp              String? @default("0") @map("op_stamp") @db.VarChar(50)
+  errorDelay           Int?    @default(60) @map("error_delay")
+  commKey              Int?    @default(0) @map("comm_key")
+  delay                Int?    @default(60) @map("delay")
+  transTimes           String? @default("00:00;14:05") @map("trans_times")
+  transInterval        Int?    @default(1) @map("trans_interval")
+  transFlag            String? @default("1111000000") @map("trans_flag")
+  realtime             Int?    @default(1) @map("realtime")
+  encryption           String? @default("0") @map("encryption")
+  timezone             String? @default("7") @map("timezone") @db.VarChar(10)
+  firmwareVersion      String? @map("firmware_version") @db.VarChar(100)
+  totalUsers           Int?    @default(0) @map("total_users")
+  totalFingerprints    Int?    @default(0) @map("total_fingerprints")
+  totalAttendances     Int?    @default(0) @map("total_attendances")
+  ipAddress            String? @map("ip_address") @db.VarChar(100)
+  portUdp              String? @default("4370") @map("port_udp") @db.VarChar(10)
+  portTcp              String? @default("80") @map("port_tcp") @db.VarChar(10)
+  statusUdp            Int?    @default(0) @map("status_udp")
+  macAddress           String? @map("mac_address") @db.VarChar(100)
+  fingerprintAlgorithm String? @map("fingerprint_algorithm") @db.VarChar(100)
+  faceAlgorithm        String? @map("face_algorithm") @db.VarChar(100)
+  totalFaces           Int?    @default(0) @map("total_faces")
+  totalFacesEnrolled   Int?    @default(0) @map("total_faces_enrolled")
+  featureSupport       String? @map("feature_support")
+  rawData              Json?   @map("raw_data")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user        User         @relation(fields: [userId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  commands    Command[]
+  logs        Log[]
+  attendances Attendance[]
+  templates   Template[]
+  deviceUsers DeviceUser[]
+
+  @@map("devices")
+}
+
+model Command {
+  id       Int    @id @default(autoincrement())
+  deviceId Int    @map("device_id")
+  command  String
+  status   String @default("pending") @db.VarChar(50) // (pending, finished)
+  rawData  Json?  @map("raw_data")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+
+  @@map("commands")
+}
+
+model Log {
+  id           Int       @id @default(autoincrement())
+  deviceId     Int       @map("device_id")
+  userId       String?   @map("user_id") @db.VarChar(50)
+  type         String?   @map("type") @db.VarChar(100)
+  timestamp    String?   @map("timestamp")
+  timestampUtc DateTime? @map("timestamp_utc") @db.Timestamp(0) // default UTC
+  rawData      Json?     @map("raw_data")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+
+  @@map("logs")
+}
+
+model DeviceUser {
+  id         Int     @id @default(autoincrement())
+  deviceId   Int     @map("device_id")
+  userId     String  @map("user_id") @db.VarChar(50)
+  name       String?
+  privilege  Int?    @default(0)
+  password   String?
+  mainCard   String? @map("main_card")
+  viceCard   String? @map("vice_card")
+  group      Int?    @default(0)
+  template   String?
+  verifyType Int?    @default(0) @map("verify_type")
+  rawData    Json?   @map("raw_data")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  device    Device     @relation(fields: [deviceId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  templates Template[]
+
+  @@unique([deviceId, userId])
+  @@map("device_users")
+}
+
+model Template {
+  id       Int      @id @default(autoincrement())
+  deviceId Int      @map("device_id")
+  userId   String?  @map("user_id") @db.VarChar(50)
+  fid      String?  @map("fid") @db.VarChar(50)
+  size     Int?
+  valid    Boolean? @default(true)
+  encode   String?
+  rawData  Json?    @map("raw_data")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  device       Device      @relation(fields: [deviceId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+  deviceUser   DeviceUser? @relation(fields: [deviceUserId], references: [id])
+  deviceUserId Int?
+
+  @@unique([deviceId, userId, fid])
+  @@map("templates")
+}
+
+model Attendance {
+  id           Int       @id @default(autoincrement())
+  deviceId     Int       @map("device_id")
+  userId       String    @map("user_id") @db.VarChar(50)
+  timestamp    String    @map("timestamp")
+  timestampUtc DateTime? @map("timestamp_utc") @db.Timestamp(0) // default UTC
+  status       Int?
+  verify       Int?      @default(1) // "Verifikasi: 0 = password/PIN, 1 = fingerprint"
+  workcode     Int?      @default(0)
+  rawData      Json?     @map("raw_data")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onUpdate: Cascade, onDelete: Cascade)
+
+  @@unique([deviceId, userId, timestamp])
+  @@map("attendances")
+}
+
+model FailedWebhook {
+  id        Int       @id @default(autoincrement())
+  url       String    @db.Text
+  payload   Json
+  timestamp Int
+  signature String    @db.VarChar(255)
+  attempts  Int       @default(0)
+  lastError String?   @map("last_error") @db.Text
+  nextRetry DateTime? @map("next_retry")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("failed_webhooks")
+}
