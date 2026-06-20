@@ -1,0 +1,45 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: adms_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_DB: adms_api
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d adms_api"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: adms_app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      TZ: Asia/Jakarta
+      APP_NAME: "ADMS API"
+      DATABASE_URL: "postgresql://postgres:postgres_password@db:5432/adms_api?schema=public"
+      JWT_SECRET: "adms-default-super-secret-key"
+      JWT_EXPIRES: 3600
+      JWT_REFRESH_SECRET: "adms-default-super-secret-refresh-key"
+      JWT_REFRESH_EXPIRES: 31536000
+      AUTHOR_NAME: "Sejator Dev"
+      AUTHOR_EMAIL: "sejatordev@gmail.com"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
