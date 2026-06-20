@@ -19,6 +19,8 @@ async function bootstrap() {
     }),
   });
 
+  app.setGlobalPrefix('adms');
+
   app.use(express.static(join(__dirname, '..', 'public')));
   app.useGlobalInterceptors(new SnakeCaseInterceptor());
   app.useGlobalInterceptors(new ResponseInterceptor());
