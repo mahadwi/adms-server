@@ -11,6 +11,9 @@ import { randomMinutes } from 'src/common/utils/format.util';
 export class TasksService {
   logger = new FileLoggerService(TasksService.name);
   private readonly MAX_RETRIES = 3;
+  private readonly WEBHOOK_TIMEOUT =
+    Number(process.env.WEBHOOK_TIMEOUT_MS) || 10000;
+  private isProcessingWebhookRetries = false;
 
   constructor(
     private prisma: PrismaService,
@@ -19,20 +22,36 @@ export class TasksService {
 
   @Cron(CronExpression.EVERY_10_SECONDS)
   async handleCron() {
+    if (this.isProcessingWebhookRetries) return;
+    this.isProcessingWebhookRetries = true;
+
+    try {
+      await this.retryFailedWebhooks();
+    } finally {
+      this.isProcessingWebhookRetries = false;
+    }
+  }
+
+  private async retryFailedWebhooks() {
     const now = new Date();
     const pending = await this.prisma.failedWebhook.findMany({
       where: {
         attempts: { lt: this.MAX_RETRIES },
         nextRetry: { lte: now },
       },
+      take: 25,
+      orderBy: { nextRetry: 'asc' },
     });
 
     if (pending.length === 0) return;
+
+    this.logger.log(`Webhook retry batch start count=${pending.length}`);
 
     for (const entry of pending) {
       try {
         const timestamp = entry.timestamp;
         const signature = entry.signature;
+        const startedAt = Date.now();
 
         const response = await firstValueFrom(
           this.http.post(entry.url, entry.payload, {
@@ -43,7 +62,7 @@ export class TasksService {
               'X-Adms-Timestamp': timestamp,
               'X-Adms-Signature': signature,
             },
-            timeout: 10000,
+            timeout: this.WEBHOOK_TIMEOUT,
           }),
         );
 
@@ -52,11 +71,24 @@ export class TasksService {
         });
 
         this.logger.log(
-          `Webhook retry success for ${entry.url} - Status: ${response.status}`,
+          `Webhook retry success url=${entry.url} status=${
+            response.status
+          } durationMs=${Date.now() - startedAt}`,
         );
       } catch (error) {
         const err = error as AxiosError;
-        const errorMsg = err?.message ?? 'Unknown error';
+        const errorMsg = this.formatWebhookError(err);
+
+        if (!this.shouldRetryWebhook(err)) {
+          await this.prisma.failedWebhook.delete({
+            where: { id: entry.id },
+          });
+
+          this.logger.warn(
+            `Webhook retry stopped url=${entry.url} error=${errorMsg}`,
+          );
+          continue;
+        }
 
         const randomDelay = randomMinutes(1, 5); // 1–5 menit acak
         const nextRetry = new Date(Date.now() + randomDelay);
@@ -71,9 +103,37 @@ export class TasksService {
         });
 
         this.logger.error(
-          `Retry ${entry.attempts + 1}/${this.MAX_RETRIES} failed for ${entry.url}: ${errorMsg}`,
+          `Webhook retry failed url=${entry.url} attempt=${
+            entry.attempts + 1
+          }/${this.MAX_RETRIES} error=${errorMsg}`,
         );
       }
     }
+
+    this.logger.log(`Webhook retry batch finished count=${pending.length}`);
+  }
+
+  private shouldRetryWebhook(error: AxiosError): boolean {
+    const status = error.response?.status;
+    if (!status) return true;
+    return status === 429 || status >= 500;
+  }
+
+  private formatWebhookError(error: AxiosError): string {
+    const status = error.response?.status;
+    const responseData = error.response?.data;
+    const responseText =
+      responseData === undefined
+        ? ''
+        : typeof responseData === 'string'
+          ? responseData
+          : JSON.stringify(responseData);
+
+    return [
+      status ? `HTTP ${status}` : error.message || 'Unknown error',
+      responseText ? responseText.slice(0, 500) : '',
+    ]
+      .filter(Boolean)
+      .join(' - ');
   }
 }

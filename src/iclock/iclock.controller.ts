@@ -31,6 +31,7 @@ export class IclockController {
 
   // GET /iclock/cdata
   @Get('cdata')
+  @Get('iclock/cdata')
   index(@Req() req: Express.Request, @Body() body: Buffer | null) {
     const params = this.normalizeParams({
       query: req.query,
@@ -41,6 +42,7 @@ export class IclockController {
 
   // GET /iclock/getrequest
   @Get('getrequest')
+  @Get('iclock/getrequest')
   getRequest(@Req() req: Express.Request, @Body() body: Buffer | null) {
     const params = this.normalizeParams({
       query: req.query,
@@ -51,6 +53,7 @@ export class IclockController {
 
   // POST /iclock/cdata
   @Post('cdata')
+  @Post('iclock/cdata')
   create(@Req() req: Express.Request, @Body() body: Buffer | null) {
     const params = this.normalizeParams({
       query: req.query,
@@ -61,6 +64,7 @@ export class IclockController {
 
   // POST /iclock/devicecmd
   @Post('devicecmd')
+  @Post('iclock/devicecmd')
   deviceCmd(@Req() req: Express.Request, @Body() body: Buffer | null) {
     const params = this.normalizeParams({
       query: req.query,

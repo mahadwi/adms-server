@@ -307,7 +307,15 @@ export class IclockService {
    * @returns Pesan hasil pemrosesan dalam bentuk string
    */
   private async parseBodyResponse(input: PayloadParams) {
-    if (!input.body || !input.device) return 'OK';
+    if (!input.device) return 'OK';
+    if (!input.body) {
+      this.logger.warn(
+        `ICLOCK body empty SN=${input.device.serialNumber} table=${
+          input.query?.table || '-'
+        }`,
+      );
+      return 'OK';
+    }
 
     const bodyStr = Buffer.isBuffer(input.body)
       ? input.body.toString('utf-8')
@@ -318,6 +326,12 @@ export class IclockService {
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean);
+
+    this.logger.log(
+      `ICLOCK payload SN=${input.device.serialNumber} table=${
+        table || '-'
+      } lines=${lines.length} bytes=${Buffer.byteLength(bodyStr, 'utf-8')}`,
+    );
 
     if (table === 'ATTLOG') {
       return await this.handleAttLog(input.device, lines);
@@ -336,6 +350,14 @@ export class IclockService {
     if (table === 'OPERLOG' && /^USER\s+PIN/i.test(bodyStr)) {
       return await this.saveUserInfo(input.device, lines);
     }
+
+    this.logger.warn(
+      `ICLOCK ignored payload SN=${input.device.serialNumber} table=${
+        table || '-'
+      } firstLine=${(lines[0] || '').slice(0, 120)}`,
+    );
+
+    return 'OK';
   }
 
   private async handleAttLog(
@@ -354,6 +376,8 @@ export class IclockService {
       rawData: string;
     }[] = [];
 
+    let invalidLineCount = 0;
+
     lines.forEach((line) => {
       const value = line.split('\t');
       if (value.length >= 5) {
@@ -367,13 +391,33 @@ export class IclockService {
           workcode: parseInt(value[4], 10),
           rawData: line,
         });
+        return;
       }
+
+      invalidLineCount += 1;
     });
+
+    this.logger.log(
+      `ATTLOG parsed SN=${device.serialNumber} lines=${lines.length} records=${records.length} invalid=${invalidLineCount}`,
+    );
+
+    if (records.length === 0) {
+      this.logger.warn(
+        `ATTLOG skipped SN=${device.serialNumber} reason=no_valid_records firstLine=${(
+          lines[0] || ''
+        ).slice(0, 120)}`,
+      );
+      return `OK: ${lines.length}`;
+    }
 
     await this.prisma.attendance.createMany({
       data: records,
       skipDuplicates: true,
     });
+
+    this.logger.log(
+      `ATTLOG saved SN=${device.serialNumber} records=${records.length}`,
+    );
 
     // Jika url webhook tersedia, kirim data presensi
     if (device.webhookUrl) {
@@ -390,6 +434,10 @@ export class IclockService {
         });
       }
 
+      this.logger.log(
+        `ATTLOG webhook queued SN=${device.serialNumber} records=${payloads.length} url=${webhookUrl}`,
+      );
+
       // Kirim ke webhook dengan signature
       this.webhookService
         .sendBulkAttendanceWebhookSafe(
@@ -400,6 +448,10 @@ export class IclockService {
         .catch((error) => {
           this.logger.error(`Webhook error: ${String(error)}`);
         });
+    } else {
+      this.logger.warn(
+        `ATTLOG webhook skipped SN=${device.serialNumber} reason=webhook_url_empty`,
+      );
     }
 
     return `OK: ${lines.length}`;

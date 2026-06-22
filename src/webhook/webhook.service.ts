@@ -11,7 +11,11 @@ import { randomMinutes } from 'src/common/utils/format.util';
 @Injectable()
 export class WebhookService {
   private readonly logger = new FileLoggerService(WebhookService.name);
-  private readonly TIMEOUT = 10000; // 10 detik
+  private readonly TIMEOUT = Number(process.env.WEBHOOK_TIMEOUT_MS) || 10000;
+  private readonly CONCURRENCY = Math.max(
+    1,
+    Number(process.env.WEBHOOK_CONCURRENCY) || 3,
+  );
 
   constructor(
     private readonly httpService: HttpService,
@@ -37,8 +41,13 @@ export class WebhookService {
   ): Promise<void> {
     const timestamp = Math.floor(Date.now() / 1000);
     const signature = createSignature(timestamp.toString(), privateKey);
+    const startedAt = Date.now();
 
     try {
+      this.logger.log(
+        `Webhook sending url=${url} sn=${payload.sn} user=${payload.user_id} attendance=${payload.timestamp}`,
+      );
+
       const response = await firstValueFrom(
         this.httpService.post(url, payload, {
           headers: {
@@ -52,22 +61,60 @@ export class WebhookService {
         }),
       );
 
-      this.logger.log(`Webhook sent to ${url} - Status: ${response.status}`);
+      this.logger.log(
+        `Webhook sent url=${url} status=${response.status} durationMs=${
+          Date.now() - startedAt
+        } sn=${payload.sn} user=${payload.user_id} attendance=${payload.timestamp}`,
+      );
     } catch (error) {
       const err = error as AxiosError;
+      const detail = this.formatWebhookError(err);
 
-      await this.saveFailedWebhook(
-        url,
-        payload,
-        timestamp,
-        signature,
-        err.message,
-      );
+      if (!this.shouldRetryWebhook(err)) {
+        this.logger.warn(
+          `Webhook rejected url=${url} durationMs=${
+            Date.now() - startedAt
+          } sn=${payload.sn} user=${payload.user_id} attendance=${
+            payload.timestamp
+          } error=${detail}`,
+        );
+        return;
+      }
+
+      await this.saveFailedWebhook(url, payload, timestamp, signature, detail);
 
       this.logger.error(
-        `Failed webhook to ${url}: ${err.message} (${err.code ?? 'NO_CODE'})`,
+        `Webhook failed url=${url} durationMs=${Date.now() - startedAt} sn=${
+          payload.sn
+        } user=${payload.user_id} attendance=${payload.timestamp} error=${detail} code=${
+          err.code ?? 'NO_CODE'
+        }`,
       );
     }
+  }
+
+  private shouldRetryWebhook(error: AxiosError): boolean {
+    const status = error.response?.status;
+    if (!status) return true;
+    return status === 429 || status >= 500;
+  }
+
+  private formatWebhookError(error: AxiosError): string {
+    const status = error.response?.status;
+    const responseData = error.response?.data;
+    const responseText =
+      responseData === undefined
+        ? ''
+        : typeof responseData === 'string'
+          ? responseData
+          : JSON.stringify(responseData);
+
+    return [
+      status ? `HTTP ${status}` : error.message,
+      responseText ? responseText.slice(0, 500) : '',
+    ]
+      .filter(Boolean)
+      .join(' - ');
   }
 
   private async saveFailedWebhook(
@@ -98,20 +145,36 @@ export class WebhookService {
     payloads: AttendanceWebhookPayload[],
     privateKey: string,
   ): Promise<void> {
-    const tasks = payloads.map((payload, index) =>
-      this.sendAttendanceWebhook(webhookUrl, payload, privateKey).catch(
-        (error) => {
+    this.logger.log(
+      `Webhook bulk start url=${webhookUrl} records=${payloads.length} concurrency=${this.CONCURRENCY}`,
+    );
+
+    let cursor = 0;
+    const workerCount = Math.min(this.CONCURRENCY, payloads.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (cursor < payloads.length) {
+        const index = cursor;
+        cursor += 1;
+
+        await this.sendAttendanceWebhook(
+          webhookUrl,
+          payloads[index],
+          privateKey,
+        ).catch((error) => {
           this.logger.error(
             `Bulk webhook failed for record ${index + 1}: ${
               error instanceof Error ? error.message : String(error)
             }`,
           );
-          return null;
-        },
-      ),
-    );
+        });
+      }
+    });
 
-    await Promise.allSettled(tasks);
+    await Promise.allSettled(workers);
+
+    this.logger.log(
+      `Webhook bulk finished url=${webhookUrl} records=${payloads.length}`,
+    );
   }
 
   /**
@@ -142,7 +205,7 @@ export class WebhookService {
     privateKey: string,
   ): Promise<void> {
     if (!this.multipleValidWebhookUrls(webhookUrl)) {
-      this.logger.error(`Invalid webhook URL(s): ${webhookUrl}`);
+      this.logger.error(`Webhook skipped invalid_url=${webhookUrl}`);
       return;
     }
 
@@ -155,7 +218,7 @@ export class WebhookService {
     privateKey: string,
   ): Promise<void> {
     if (!this.multipleValidWebhookUrls(webhookUrl)) {
-      this.logger.error(`Invalid webhook URL(s): ${webhookUrl}`);
+      this.logger.error(`Webhook bulk skipped invalid_url=${webhookUrl}`);
       return;
     }
 
