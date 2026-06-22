@@ -11,7 +11,7 @@ import { randomMinutes } from 'src/common/utils/format.util';
 @Injectable()
 export class WebhookService {
   private readonly logger = new FileLoggerService(WebhookService.name);
-  private readonly TIMEOUT = Number(process.env.WEBHOOK_TIMEOUT_MS) || 10000;
+  private readonly TIMEOUT = Number(process.env.WEBHOOK_TIMEOUT_MS) || 30000;
   private readonly CONCURRENCY = Math.max(
     1,
     Number(process.env.WEBHOOK_CONCURRENCY) || 3,
@@ -138,6 +138,10 @@ export class WebhookService {
         nextRetry,
       },
     });
+
+    this.logger.warn(
+      `Webhook queued for retry url=${url} sn=${payload.sn} user=${payload.user_id} attendance=${payload.timestamp} nextRetry=${nextRetry.toISOString()} error=${errorMsg}`,
+    );
   }
 
   async sendBulkAttendanceWebhook(

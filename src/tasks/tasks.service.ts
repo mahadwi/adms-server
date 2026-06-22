@@ -12,7 +12,7 @@ export class TasksService {
   logger = new FileLoggerService(TasksService.name);
   private readonly MAX_RETRIES = 3;
   private readonly WEBHOOK_TIMEOUT =
-    Number(process.env.WEBHOOK_TIMEOUT_MS) || 10000;
+    Number(process.env.WEBHOOK_TIMEOUT_MS) || 30000;
   private isProcessingWebhookRetries = false;
 
   constructor(
