@@ -16,6 +16,8 @@ export class WebhookService {
     1,
     Number(process.env.WEBHOOK_CONCURRENCY) || 3,
   );
+  private readonly URL_REWRITE_FROM = process.env.WEBHOOK_URL_REWRITE_FROM || '';
+  private readonly URL_REWRITE_TO = process.env.WEBHOOK_URL_REWRITE_TO || '';
 
   constructor(
     private readonly httpService: HttpService,
@@ -27,11 +29,32 @@ export class WebhookService {
     payload: AttendanceWebhookPayload,
     privateKey: string,
   ): Promise<void> {
-    const urls = webhookUrl.split(',').map((url) => url.trim());
+    const urls = webhookUrl
+      .split(',')
+      .map((url) => url.trim())
+      .map((url) => this.resolveWebhookUrl(url));
 
     for (const url of urls) {
       await this.sendSingleWebhook(url, payload, privateKey);
     }
+  }
+
+  private resolveWebhookUrl(url: string): string {
+    if (
+      !this.URL_REWRITE_FROM ||
+      !this.URL_REWRITE_TO ||
+      !url.startsWith(this.URL_REWRITE_FROM)
+    ) {
+      return url;
+    }
+
+    const rewritten = `${this.URL_REWRITE_TO}${url.slice(
+      this.URL_REWRITE_FROM.length,
+    )}`;
+
+    this.logger.log(`Webhook URL rewritten from=${url} to=${rewritten}`);
+
+    return rewritten;
   }
 
   private async sendSingleWebhook(
@@ -200,6 +223,7 @@ export class WebhookService {
     return webhookUrl
       .split(',')
       .map((url) => url.trim())
+      .map((url) => this.resolveWebhookUrl(url))
       .every((url) => this.isValidWebhookUrl(url));
   }
 

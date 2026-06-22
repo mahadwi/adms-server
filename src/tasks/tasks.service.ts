@@ -13,6 +13,8 @@ export class TasksService {
   private readonly MAX_RETRIES = 3;
   private readonly WEBHOOK_TIMEOUT =
     Number(process.env.WEBHOOK_TIMEOUT_MS) || 30000;
+  private readonly URL_REWRITE_FROM = process.env.WEBHOOK_URL_REWRITE_FROM || '';
+  private readonly URL_REWRITE_TO = process.env.WEBHOOK_URL_REWRITE_TO || '';
   private isProcessingWebhookRetries = false;
 
   constructor(
@@ -52,9 +54,10 @@ export class TasksService {
         const timestamp = entry.timestamp;
         const signature = entry.signature;
         const startedAt = Date.now();
+        const deliveryUrl = this.resolveWebhookUrl(entry.url);
 
         const response = await firstValueFrom(
-          this.http.post(entry.url, entry.payload, {
+          this.http.post(deliveryUrl, entry.payload, {
             headers: {
               'User-Agent': 'Adms Server/1.0(Adms Server Webhook)',
               Accept: 'application/json',
@@ -71,7 +74,7 @@ export class TasksService {
         });
 
         this.logger.log(
-          `Webhook retry success url=${entry.url} status=${
+          `Webhook retry success url=${deliveryUrl} originalUrl=${entry.url} status=${
             response.status
           } durationMs=${Date.now() - startedAt}`,
         );
@@ -117,6 +120,24 @@ export class TasksService {
     const status = error.response?.status;
     if (!status) return true;
     return status === 429 || status >= 500;
+  }
+
+  private resolveWebhookUrl(url: string): string {
+    if (
+      !this.URL_REWRITE_FROM ||
+      !this.URL_REWRITE_TO ||
+      !url.startsWith(this.URL_REWRITE_FROM)
+    ) {
+      return url;
+    }
+
+    const rewritten = `${this.URL_REWRITE_TO}${url.slice(
+      this.URL_REWRITE_FROM.length,
+    )}`;
+
+    this.logger.log(`Webhook retry URL rewritten from=${url} to=${rewritten}`);
+
+    return rewritten;
   }
 
   private formatWebhookError(error: AxiosError): string {
