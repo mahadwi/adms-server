@@ -39,19 +39,9 @@ services:
       AUTHOR_EMAIL: "sejatordev@gmail.com"
       WEBHOOK_TIMEOUT_MS: 30000
       WEBHOOK_CONCURRENCY: 1
-      WEBHOOK_URL_REWRITE_FROM: "https://stg-pjlp.palembang.go.id"
-      WEBHOOK_URL_REWRITE_TO: "http://pjlp-be:5003"
-    networks:
-      - default
-      - pjlp-net
     depends_on:
       db:
         condition: service_healthy
 
 volumes:
   postgres_data:
-
-networks:
-  pjlp-net:
-    external: true
-    name: sistem-opd_pjlp-net
